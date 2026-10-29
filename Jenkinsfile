@@ -7,11 +7,6 @@ pipeline {
         AWS_REGION = credentials('region')
     }
     stages {
-        stage('checkout') {
-            steps {
-                git url: "https://github.com/NikhilVaghela07/Kubeadm-Cluster-Setup.git" , branch: "main"
-            }
-        }
         stage('Terraform-plan') {
             steps {
                 dir('terraform') {
