@@ -7,9 +7,25 @@
     KUBECONFIG: /etc/kubernetes/admin.conf
   become: true
 
+- name: Check whether deployment exists
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - get
+      - deployment
+      - my-deployment
+      - --output=name
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  become: true
+  register: deployment_check
+  changed_when: false
+  failed_when: deployment_check.rc not in [0, 1]
+
 - name: Create deployment
   ansible.builtin.shell: |
     kubectl create deployment my-deployment --image=nginx --replicas=5
   environment:
     KUBECONFIG: /etc/kubernetes/admin.conf
   become: true
+  when: deployment_check.rc == 1
