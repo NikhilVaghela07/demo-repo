@@ -1,0 +1,24 @@
+- name: Host for running
+  hosts: workers:masternode
+  become: true
+  roles:
+    - common
+    - containerd
+
+- name: control plan configuration
+  hosts: masternode
+  become: true
+  roles:
+    - control-plan
+
+- name: join workernodes
+  hosts: workers
+  become: true
+  roles:
+    - workernode
+
+- name: checking cluster
+  hosts: masternode
+  become: true
+  roles:
+    - checkworking

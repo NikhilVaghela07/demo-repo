@@ -1,0 +1,108 @@
+---
+# tasks file for controle-plan
+- name: init control plane
+  become: true
+  ansible.builtin.command:
+    argv:
+      - kubeadm
+      - init
+      - --pod-network-cidr={{ pod_network_cidr }}
+    creates: "{{ kubeadm_config_path }}"
+
+- name: kubeconfig direcory
+  become_user: "{{ ansible_user }}"
+  ansible.builtin.file:
+    path: "{{ kubeconfig_directory }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0755"
+
+- name: copy admin config file
+  become: true
+  ansible.builtin.copy:
+    remote_src: true
+    src: "{{ admin_config_path }}"
+    dest: "{{ kubeconfig_path }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0600"
+
+- name: remove control node taint
+  become: true
+  become_user: "{{ ansible_user }}"
+  ansible.builtin.command:
+    argv:
+      - kubectl
+      - taint 
+      - nodes 
+      - --all 
+      - node-role.kubernetes.io/control-plane-
+  register: taint_result
+  changed_when: taint_result.rc == 0
+  failed_when:
+    - taint_result.rc != 0
+    - "'taint' not in (taint_result.stderr | lower)"
+    - "'not found' not in (taint_result.stderr | lower)"
+
+# calico
+- name: "Untaint the master node and install network plugin"
+  become: true
+  environment:
+    KUBECONFIG: /etc/kubernetes/admin.conf
+  block:
+    - name: "Untaint the master node"
+      ansible.builtin.command:
+        cmd: "kubectl taint nodes --all node-role.kubernetes.io/control-plane-"
+      register: untaint_result
+      changed_when: "'untainted' in untaint_result.stdout"
+      failed_when: false
+
+    - name: "Install Calico crd"
+      ansible.builtin.command:
+        cmd: >-
+          kubectl create -f
+          https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/v3_projectcalico_org.yaml
+      register: calico_crds
+      changed_when: calico_crds.rc == 0
+      failed_when:
+        - calico_crds.rc != 0
+        - "'AlreadyExists' not in calico_crds.stderr"
+
+    - name: Install Tigera operator
+      ansible.builtin.command:
+        cmd: >-
+          kubectl create -f
+          https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/tigera-operator.yaml
+      register: tigera_operator
+      changed_when: tigera_operator.rc == 0
+      failed_when: tigera_operator.rc != 0 and 'AlreadyExists' not in tigera_operator.stderr
+
+    - name: Wait for Calico operator to be ready
+      ansible.builtin.command:
+        cmd: kubectl get crd installations.operator.tigera.io
+      register: wait_tigera_operator
+      changed_when: false
+      until: wait_tigera_operator.rc == 0
+      retries: 10
+      delay: 5
+      failed_when: wait_tigera_operator.rc != 0
+
+    - name: Install Calico custom resources
+      ansible.builtin.command:
+        cmd: >-
+          kubectl create -f
+          https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/custom-resources.yaml
+      register: calico_resources
+      changed_when: calico_resources.rc == 0
+      failed_when: calico_resources.rc != 0 and 'AlreadyExists' not in calico_resources.stderr
+
+- name: worker node join
+  become: true
+  ansible.builtin.command:
+    cmd: kubeadm token create --print-join-command
+  register: workernode_join_command
+  
+- name: Save worker join command
+  ansible.builtin.set_fact:
+    kubeadm_join_command: "{{ workernode_join_command.stdout }}"

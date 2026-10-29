@@ -1,0 +1,47 @@
+pipeline {
+    agent any
+    environment {
+        TF_VARS_FILE = credentials('terraform-tfvars')
+        AWS_ACCESS_KEY_ID     = credentials('access-key')
+        AWS_SECRET_ACCESS_KEY = credentials('secret-key')
+        AWS_REGION = credentials('region')
+    }
+    stages {
+        stage('checkout') {
+            steps {
+                git url: "https://github.com/NikhilVaghela07/Kubeadm-Cluster-Setup.git" , branch: "main"
+            }
+        }
+        stage('Terraform-plan') {
+            steps {
+                dir('terraform') {
+                    withCredentials([file(credentialsId: 'terraform-tfvars', variable: 'TF_VARS_FILE')]) {
+                        sh 'terraform init'
+                        sh 'terraform plan -out=ec2plan -var-file=$TF_VARS_FILE'
+                    }
+                }
+            } 
+        }
+        stage('Terraform-apply') {
+            steps {
+                dir('terraform') {
+                    sh 'terraform apply -auto-approve ec2plan'
+                }
+            }   
+        }
+        stage('running playbook') {
+            steps {
+                dir('ansible') {
+                    withEnv(['LANG=en_US.UTF-8', 'LC_ALL=en_US.UTF-8']) {
+                        sh 'ansible-playbook playbooks/main.yml'
+                    }
+                }
+            }
+        }
+        stage('Execution Done') {
+            steps {
+                echo "Configuration Done"
+            }
+        }
+    }
+}
